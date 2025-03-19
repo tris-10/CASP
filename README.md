@@ -30,12 +30,21 @@ set up for the Slurm workload manager.
 
 1. ONT data should be basecalled with Dorado (traditional + 5mC) prior to running the pipeline.  Example basecalling command: `dorado basecaller sup,5mCG_5hmCG pod5/ --min-qscore 10 > SAMPLE_SFE.bam`
 1. The CASP assembly pipeline supports SFE or a combination of SFE + UL reads.  Copy or link all basecalled ONT reads in bam format
-   into the `sfe_bam` and/or `ul_bam` directory depending on what was sequenced, one file per sample. SFE bam files should be named: 
-   `SAMPLE_SFE.bam`, where `SAMPLE` is a name of your choice.  UL fastq files should be named `SAMPLE_UL.bam`.
+   into a directory named `sfe_bam` and/or `ul_bam` depending on what was sequenced, one file per sample. SFE bam files should be named: 
+   `SAMPLE_SFE.bam`, where `SAMPLE` is a name of your choice.  UL fastq files should be named `SAMPLE_UL.bam`.  The input directory name can be modified from the default `sfe_bam` in the nextflow `*.config` files.
 1. The project name can be modified by updating the `project_name` parameter in the config file (e.g.`casp_mhc.config`).  The `run_type` 
    parameter should be set to `sfe` or `sfe_ul` depending on the available reads.
 1. The pipeline can be started with the command `nextflow run casp.nf -c casp_mhc.config`
    
+## Run Completion
+
+1. On completion, output files can be found in the `project_name` directory.
+    * `mhc_align`: alignment file(s) in bam format
+    * `mhc_reads`: Raw and corrected MHC-specific reads in fastq format
+    * `mhc_final_contigs`: MHC assemblies
+    * `mhc_stats`: Pipeline statistics
+1. Interrupted runs can be resumed: `nextflow run casp.nf -c casp_mhc.config -resume`
+1. On workflow completion, intermediate files can be removed from the `work` directory
 
 ## How to Run: HIFIASM MHC/KIR
 
@@ -65,17 +74,6 @@ set up for the Slurm workload manager.
 1. Create a new config file based off of the KIR pipeline `cp casp_hifiasm_kir.config casp_hifiasm_REGION.config`. Modify
    the `region` and `genome_size` parameters to match your targeted region.
 1. Follow the instructions in `How to Run: HIFIASM MHC / KIR` to assemble your region of interest. 
-
-
-## Run Completion
-
-1. On completion, output files can be found in the `project_name` directory.
-    * `mhc_align`: alignment file(s) in bam format
-    * `mhc_reads`: Raw and corrected MHC-specific reads in fastq format
-    * `mhc_final_contigs`: MHC assemblies
-    * `mhc_stats`: Pipeline statistics
-1. Interrupted runs can be resumed: `nextflow run casp_mhc.nf -c casp_mhc.config -resume`
-1. On workflow completion, intermediate files can be removed from the `work` directory
 
 
 ## External tools
