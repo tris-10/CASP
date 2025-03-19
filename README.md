@@ -40,9 +40,11 @@ set up for the Slurm workload manager.
 
 1. On completion, output files can be found in the `project_name` directory.
     * `mhc_align`: alignment file(s) in bam format
-    * `mhc_reads`: Raw and corrected MHC-specific reads in fastq format
-    * `mhc_final_contigs`: MHC assemblies
+    * `mhc_reads`: Raw and corrected MHC-specific reads in fastq/fasta format
+    * `mhc_final_contigs`: MHC assemblies in fasta format
     * `mhc_stats`: Pipeline statistics
+    * `mhc_phasing`: Phased variant calls in vcf format and phase block definitions in gtf format. 
+1. The file ‘mhc_phasing/SAMPLE_mhc_merge_phase.gtf’ represents the final phase blocks before haplotype estimation.  If all SNVs are contained in a single block across the MHC, the assembled haplotypes can be considered fully phased.  If there are multiple blocks in the GTF file, assemblies relied on haplotype estimation to join the blocks and there could potentially be phase switches at those locations.  If fully resolved samples are required and the distances between the blocks are less than 100 kb, addition of UL reads could resolve the breaks.
 1. Interrupted runs can be resumed: `nextflow run casp.nf -c casp_mhc.config -resume`
 1. On workflow completion, intermediate files can be removed from the `work` directory
 
