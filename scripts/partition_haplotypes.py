@@ -56,7 +56,10 @@ def main():
                         help="The maximum number of allowed mismatches a probe alignment")
     parser.add_argument('-p', '--max_probe_placements', default=8, type=int,
                         help="The maximum number of alignments allowed for probe flanking sequences")
+    parser.add_argument('-a', '--min_hemi_hets', default=3, type=int,
+                        help="Minimum number of heterozygous positions within an unphased block to assign hemizygous")
     parser.add_argument("-n", "--minimap_path", help="Path to minimap2 binary", default="minimap2")
+    parser.add_argument("-r", "--retain_split_corr", help="Retain split corrected reads", default=False, action="store_true")
     args = parser.parse_args()
 
     logging.basicConfig(format='%(levelname)s:%(asctime)s %(message)s', level=logging.INFO)
@@ -94,7 +97,8 @@ def main():
     add_probes_to_unphased_blocks(args.tagged_bam, unphased_blocks, valid_probe_dict, args.min_hemi_depth)
 
     logging.info("Determine if unphased blocks are hemizygous or homozygous")
-    hom_blocks, hemi_blocks = assign_unphased_blocks(unphased_blocks, hemi_dict, args.min_frac_contam_split)
+    hom_blocks, hemi_blocks = assign_unphased_blocks(unphased_blocks, hemi_dict, args.min_frac_contam_split,
+                                                     args.min_hemi_hets)
 
     logging.info("Check for inconsistent haplotype assignment in phased blocks")
     phased_blocks = split_phased_blocks(phased_blocks, hom_blocks, args.min_gt_count, args.min_frac_contam_split)
@@ -111,7 +115,7 @@ def main():
     read_assignments = assign_reads_in_homo_blocks(args.tagged_bam, hom_blocks, read_assignments)
 
     logging.info("Writing binned reads")
-    write_split_fasta(args.tagged_bam, read_assignments, args.output_prefix, args.mhc_fasta)
+    write_split_fasta(args.tagged_bam, read_assignments, args.output_prefix, args.mhc_fasta, args.retain_split_corr)
 
     with open(args.output_stats, "w") as op_stats:
         op_stats.write("\n".join(stl) + "\n")
@@ -340,7 +344,7 @@ def add_probes_to_unphased_blocks(tagged_bam, unphased_blocks, valid_probe_dict,
     stl.append("ref_het_unphased_block\t{0}".format(used))
 
 
-def identify_homozyous_regions(block, hemizygous_blocks, homozygous_blocks, pred_hemi_regions, min_edge_length=5000):
+def identify_homozyous_regions(block, hemizygous_blocks, homozygous_blocks, pred_hemi_regions, min_het_assign, min_edge_length=5000):
     """
     If an unphased block contains no haplotype assignments, the block is assumed to be homozygous. If there
     are haplotype assignments, the ends of the block are checked to see if there are more than min_edge_length
@@ -353,9 +357,10 @@ def identify_homozyous_regions(block, hemizygous_blocks, homozygous_blocks, pred
     :param hemizygous_blocks: Dictionary of hemizygous block objects
     :param homozygous_blocks: Dictionary of homozygous blocks objects
     :param pred_hemi_regions: Dictionary of homozygous and hemizygous assembly blocks
+    :param min_het_assign: Minimum number of heterozygous positions for hemizygous block assignment
     """
 
-    split_blocks = block.split_hom_block(pred_hemi_regions, min_edge_length)
+    split_blocks = block.split_hom_block(pred_hemi_regions, min_het_assign, min_edge_length)
 
     if split_blocks[0] is None:
         homozygous_blocks[block.name] = block
@@ -365,7 +370,7 @@ def identify_homozyous_regions(block, hemizygous_blocks, homozygous_blocks, pred
             homozygous_blocks[b.name] = b
 
 
-def assign_unphased_blocks(unphased_blocks, pred_hemi_regions, max_contam, min_hets=10):
+def assign_unphased_blocks(unphased_blocks, pred_hemi_regions, max_contam, min_het_assign, min_het_split=10):
     """
     For each unphased block in the assembly, predict if the region is hemizygous or homozygous. Prior to assignment,
     check unphased blocks to see if there is a mix of haplotype assignments, defined as at least min_hets
@@ -381,20 +386,21 @@ def assign_unphased_blocks(unphased_blocks, pred_hemi_regions, max_contam, min_h
 
     :param unphased_blocks: Dictionary of unphased block objects
     :param pred_hemi_regions: Dictionary of overlapping contig regions, which are predicted to be hemizygous
-    :param min_hets: Minimum hets required for hemizygous region splitting
     :param max_contam: Minimum amount of contamination needed to trigger split.
+    :param min_het_assign: Minimum number of heterozygous positions in a unphased block to assign hemizygous
+    :param min_het_split: Minimum number of heterozygous positions in a unphased block to check for contamination
     :return: Dictionary of homozygous and hemizygous assembly blocks
     """
 
     homozygous_blocks = {}
     hemizygous_blocks = {}
     for block in unphased_blocks.values():
-        split_blocks = block.split_hemi_block(max_contam, min_hets)
+        split_blocks = block.split_hemi_block(max_contam, min_het_split)
         if len(split_blocks) == 1:
-            identify_homozyous_regions(split_blocks[0], hemizygous_blocks, homozygous_blocks, pred_hemi_regions)
+            identify_homozyous_regions(split_blocks[0], hemizygous_blocks, homozygous_blocks, pred_hemi_regions, min_het_assign)
         else:
-            identify_homozyous_regions(split_blocks[0], hemizygous_blocks, homozygous_blocks, pred_hemi_regions)
-            identify_homozyous_regions(split_blocks[1], hemizygous_blocks, homozygous_blocks, pred_hemi_regions)
+            identify_homozyous_regions(split_blocks[0], hemizygous_blocks, homozygous_blocks, pred_hemi_regions, min_het_assign)
+            identify_homozyous_regions(split_blocks[1], hemizygous_blocks, homozygous_blocks, pred_hemi_regions, min_het_assign)
             homozygous_blocks[split_blocks[2].name] = split_blocks[2]
     return homozygous_blocks, hemizygous_blocks
 
@@ -473,7 +479,9 @@ def assign_reads_in_phased_blocks(tagged_bam, phased_blocks, min_count, max_frac
                     if read.query_name in read_assign or read.is_supplementary or read.is_secondary:
                         continue
 
+                    # Only process reads that are tagged with whatshap
                     tag = read.get_tag('HP')
+                    ps = read.get_tag("PS")
                     if hap == bio.BlockAssign.HAP1:
                         block_read_counts["ASSIGN"] += 1
                         read_assign[read.query_name] = ReadAssign.HAP1 if tag == 1 else ReadAssign.HAP2
@@ -645,7 +653,7 @@ def assign_reads_in_homo_blocks(tagged_bam, homo_blocks, read_assignments):
     return read_assignments
 
 
-def write_split_fasta(tagged_bam, collapsed_read_assignments, output_prefix, mhc_fasta):
+def write_split_fasta(tagged_bam, collapsed_read_assignments, output_prefix, mhc_fasta, retain_split_corr):
     """
     Write out binned reads based on the assignments
 
@@ -653,10 +661,20 @@ def write_split_fasta(tagged_bam, collapsed_read_assignments, output_prefix, mhc
     :param collapsed_read_assignments: Read assignment dictionary
     :param output_prefix: Prefix the output files
     :param mhc_fasta: Path to MHC-specific reads in fasta format
+    :param retain_split_reads: If false, do not write out split corrected reads
     """
 
     read_counts = defaultdict(int)
-    fasta_dict = SeqIO.to_dict(SeqIO.parse(mhc_fasta, "fasta"))
+    fasta_dict = defaultdict(list)
+    if retain_split_corr:
+        with open(mhc_fasta, "r") as ipf:
+            for record in SeqIO.parse(ipf, "fasta"):
+                orig_name = record.id.split("_")[0].split(":")[0]
+                fasta_dict[orig_name].append(record)
+    else:
+        with open(mhc_fasta, "r") as ipf:
+            for record in SeqIO.parse(ipf, "fasta"):
+                fasta_dict[record.id].append(record)
 
     with pysam.AlignmentFile(tagged_bam, 'rb') as bam_in, open(output_prefix + '_hap1_only.fasta', 'w') as hap1_out, \
             open(output_prefix + '_hap2_only.fasta', 'w') as hap2_out, open(output_prefix + '_unknown.fasta', 'w') as unknown_out:
@@ -701,7 +719,10 @@ def write_split_fasta(tagged_bam, collapsed_read_assignments, output_prefix, mhc
                 handle = unknown_out
                 read_counts["unobserved"] += 1
 
-            SeqIO.write(fasta_dict[a.query_name], handle, "fasta")
+            read_name = a.query_name
+            if read_name not in fasta_dict:
+                continue
+            SeqIO.write(fasta_dict[read_name], handle, "fasta")
 
         hap1_tot = read_counts["hap1"] + read_counts["hap1_hap"] + read_counts["hap1_rand"]
         hap2_tot = read_counts["hap2"] + read_counts["hap2_hap"] + read_counts["hap2_rand"]
@@ -726,3 +747,4 @@ if __name__ == '__main__':
         main()
     except KeyboardInterrupt:
         sys.exit(1)
+

@@ -35,11 +35,11 @@ def main():
     parser.add_argument('-f', '--min_overlap_frac', type=float, default=0.999,
                         help="Minimum overlap required to remove contig or identify boundaries.")
     parser.add_argument("-m", "--max_contig_size", type=int, default=200000,
-                    help="Maximum contig length that can be removed.")
+                        help="Maximum contig length that can be removed.")
     parser.add_argument("-e", "--max_edge_distance", type=int, default=1000,
-                    help="Maximum distance from contig end to consider for overlap stitching")
+                        help="Maximum distance from contig end to consider for overlap stitching")
     parser.add_argument('-l', "--min_overlap_length", type=int, default=5000,
-                    help="Minimum overlap between two contigs required for stitiching")
+                        help="Minimum overlap between two contigs required for stitiching")
 
     args = parser.parse_args()
 
@@ -52,17 +52,30 @@ def main():
     remove_bubbles(args.hap2_contig_path, 1, contigs_to_remove)
 
     logging.info("Align haplotype assemblies to each other")
-    stl.append("\nOverlap Removal\nHap\tFiltTigName\tFitTigLength\tOvlTigName\tOvlTigLength\tIdentity\tOverlap")
-    remove_hap_overlaps(args.hap1_contig_path, args.hap2_contig_path, 0, contigs_to_remove, args.final_hap1_output,
-                        args.max_contig_size, args.min_identity, args.min_overlap_frac, args.minimap2_path, args.threads)
-    remove_hap_overlaps(args.hap2_contig_path, args.hap1_contig_path, 1, contigs_to_remove, args.final_hap2_output,
-                        args.max_contig_size, args.min_identity, args.min_overlap_frac, args.minimap2_path, args.threads)
+    stl.append("\nOverlap Removal\nHap\tFiltTigName\tFitTigLength\tOther\tOvlTigName\tOvlTigLength\tIdentity\tOverlap")
+    remove_hap_overlaps(args.hap1_contig_path, args.hap2_contig_path, 0, 1, contigs_to_remove, args.final_hap1_output,
+                        args.max_contig_size, args.min_identity, args.min_overlap_frac, args.minimap2_path,
+                        args.threads)
+    remove_hap_overlaps(args.hap2_contig_path, args.hap1_contig_path, 1, 0, contigs_to_remove, args.final_hap2_output,
+                        args.max_contig_size, args.min_identity, args.min_overlap_frac, args.minimap2_path,
+                        args.threads)
+
+    logging.info("Align haplotype assemblies to self")
+    stl.append("\nOverlap Removal\nHap\tFiltTigName\tFitTigLength\tSelf\tOvlTigName\tOvlTigLength\tIdentity\tOverlap")
+    remove_hap_overlaps(args.hap1_contig_path, args.hap1_contig_path, 0, 0, contigs_to_remove, args.final_hap1_output,
+                        args.max_contig_size, args.min_identity, args.min_overlap_frac, args.minimap2_path,
+                        args.threads)
+    remove_hap_overlaps(args.hap2_contig_path, args.hap2_contig_path, 1, 1, contigs_to_remove, args.final_hap2_output,
+                        args.max_contig_size, args.min_identity, args.min_overlap_frac, args.minimap2_path,
+                        args.threads)
 
     logging.info("Trimming assemblies to the capture boundaries")
     stl.append("\nBoundary Trimming\nHaplotype\tTigName\tBoundary\tRemovedBases\tOrient")
-    trim_contigs_to_boundaries(args.hap1_contig_path, 0, contigs_to_remove, args.boundary_sequences, args.final_hap1_output,
+    trim_contigs_to_boundaries(args.hap1_contig_path, 0, contigs_to_remove, args.boundary_sequences,
+                               args.final_hap1_output,
                                args.minimap2_path, args.threads)
-    trim_contigs_to_boundaries(args.hap2_contig_path, 1, contigs_to_remove, args.boundary_sequences, args.final_hap2_output,
+    trim_contigs_to_boundaries(args.hap2_contig_path, 1, contigs_to_remove, args.boundary_sequences,
+                               args.final_hap2_output,
                                args.minimap2_path, args.threads)
 
     logging.info("Stitching together assemblies")
@@ -92,7 +105,7 @@ def remove_bubbles(contigs, idx, contigs_to_remove):
                 contigs_to_remove[idx].add(record.id)
 
 
-def remove_hap_overlaps(hap1_contigs, hap2_contigs, idx, contigs_to_remove, output_path, max_size, min_identity,
+def remove_hap_overlaps(hap1_contigs, hap2_contigs, idx1, idx2, contigs_to_remove, output_path, max_size, min_identity,
                         min_overlap_frac, minimap_path, threads):
     """
     Find overlaps between haplotype assemblies, remove contigs in hapA that completely overlap a longer contig in
@@ -100,17 +113,18 @@ def remove_hap_overlaps(hap1_contigs, hap2_contigs, idx, contigs_to_remove, outp
 
     :param hap1_contigs: Path to hap1 assembly in fasta format
     :param hap2_contigs: Path to hap2 assembly in fasta format
-    :param idx: Haplotype index.
+    :param idx1: Query idx
+    :param idx2: Target idx
     :param output_path: Path to filtered output file in fasta format
     :param max_size: Maximum contig length that can be filtered out.
     :param min_identity: Minimum identity between hapA/hapB contigs required for removing shorter hapA contig.
     :param min_overlap_frac: Minimum overlap between hapA/hapB contigs required for removing shorter hapA contig.
     :param minimap_path: Path to minimap2 binary.
     :param threads: Number of minimap2 threads.
-    :return: Set of contig names to remove.
     """
 
-    hap = get_hap_name(idx)
+    hap1 = get_hap_name(idx1)
+    hap2 = get_hap_name(idx2)
     out_path = Path(output_path)
     align_file = out_path.parent.joinpath(out_path.stem + "_temp_ovl.paf")
 
@@ -118,24 +132,21 @@ def remove_hap_overlaps(hap1_contigs, hap2_contigs, idx, contigs_to_remove, outp
         subprocess.run([minimap_path, '-x', 'map-hifi', '-c', '-t', str(threads), '-o', align_file, hap2_contigs,
                         hap1_contigs], check=True)
 
-        align_paf = pio.load_query_alignments(align_file)
+        align_paf = pio.load_single_alignments(align_file)
 
-        for align_list in align_paf:
-            for a in align_list:
-                ovl = (a.query_end - a.query_start) / a.query_length
+        for a in align_paf:
+            ovl = (a.query_end - a.query_start) / a.query_length
+            size_ratio = a.target_length / a.query_length
+        
+            if ovl >= min_overlap_frac and size_ratio > 2 and a.target_name not in contigs_to_remove[idx2] and \
+                    ((a.totalNM < 5 and a.query_name.startswith("h1")) or (a.query_length < max_size and a.identityNM >= min_identity)):
+                stl.append("{0}\t{1}\t{2}\t{3}\t{4}\t{5}\t{6:.4f}\t{7:.4f}".format(hap1, a.query_name, a.query_length,
+                                                                                   hap2, a.target_name, a.target_length,
+                                                                                   a.identityNM, ovl))
+                contigs_to_remove[idx1].add(a.query_name)
 
-                if ovl < min_overlap_frac:
-                    continue
-
-                if ovl >= min_overlap_frac and ((a.totalNM < 5 and a.query_name.startswith("h1")) or
-                                                (a.query_length < max_size and a.identityNM >= min_identity)):
-                    stl.append("{0}\t{1}\t{2}\t{3}\t{4}\t{5:.4f}\t{6:.4f}".format(hap, a.query_name, a.query_length,
-                                                                                  a.target_name, a.target_length,
-                                                                                  a.identityNM, ovl))
-                    contigs_to_remove[idx].add(a.query_name)
-
-    except subprocess.CalledProcessError as error:
-        logging.error("Error overlapping assemblies: {0}".format(error.cmd))
+    except subprocess.CalledProcessError as cpe:
+        logging.error("Error overlapping assemblies: {0}".format(cpe.cmd))
         sys.exit(1)
     finally:
         if os.path.exists(align_file):
@@ -167,23 +178,22 @@ def trim_contigs_to_boundaries(contig_file, idx, contigs_to_remove, boundary_fil
         updated_starts = {}
         updated_ends = {}
         updated_orient = set()
-        for align_group in pio.load_query_alignments(align_file):
-            for a in align_group:
-                ovl = (a.query_end - a.query_start) / a.query_length
-                if ovl >= 0.99:
-                    if a.query_name == "START":
-                        if a.strand == "-":
-                            updated_orient.add(a.target_name)
-                            updated_ends[a.target_name] = a.target_end
-                        else:
-                            updated_starts[a.target_name] = a.target_start
+        for a in pio.load_single_alignments(align_file):
+            ovl = (a.query_end - a.query_start) / a.query_length
+            if ovl >= 0.99:
+                if a.query_name == "START":
+                    if a.strand == "-":
+                        updated_orient.add(a.target_name)
+                        updated_ends[a.target_name] = a.target_end
+                    else:
+                        updated_starts[a.target_name] = a.target_start
 
-                    elif a.query_name == "END":
-                        if a.strand == "-":
-                            updated_orient.add(a.target_name)
-                            updated_starts[a.target_name] = a.target_start
-                        else:
-                            updated_ends[a.target_name] = a.target_end
+                elif a.query_name == "END":
+                    if a.strand == "-":
+                        updated_orient.add(a.target_name)
+                        updated_starts[a.target_name] = a.target_start
+                    else:
+                        updated_ends[a.target_name] = a.target_end
 
         with open(contig_file) as ipf, open(output_file, "w") as opf:
             for record in SeqIO.parse(ipf, "fasta"):
@@ -195,19 +205,19 @@ def trim_contigs_to_boundaries(contig_file, idx, contigs_to_remove, boundary_fil
                 if record.id in updated_starts:
                     start = updated_starts[record.id]
                     stl.append("{0}\t{1}\t{2}\t{3}\t{4}".format(hap, record.id, 'END' if record.id in updated_orient else 'START',
-                                                           start, '-' if record.id in updated_orient else '+'))
+                                                                start, '-' if record.id in updated_orient else '+'))
 
                 if record.id in updated_ends:
                     end = updated_ends[record.id]
                     stl.append("{0}\t{1}\t{2}\t{3}\t{4}".format(hap, record.id, 'START' if record.id in updated_orient else 'END',
-                                                           len(record.seq) - end, '-' if record.id in updated_orient else '+'))
+                                                                len(record.seq) - end, '-' if record.id in updated_orient else '+'))
 
                 record.seq = record.seq[start:end]
                 if record.id in updated_orient:
                     record.seq = record.seq.reverse_complement()
                 SeqIO.write(record, opf, "fasta")
-    except subprocess.CalledProcessError as error:
-        logging.error("Error aligning boundary sequences to contigs: {0} see stderr for details".format(error.cmd))
+    except subprocess.CalledProcessError as cpe:
+        logging.error("Error aligning boundary sequences to contigs: {0} see stderr for details".format(cpe.cmd))
         sys.exit(1)
     finally:
         if os.path.exists(align_file):
@@ -229,40 +239,49 @@ def stitch_contigs(contig_path, idx, end_distance, overlap_length, overlap_ident
     """
     out_path = Path(contig_path)
     align_file = out_path.parent.joinpath(out_path.stem + "_stitch.paf")
-    contig_dict = SeqIO.to_dict(SeqIO.parse(contig_path, "fasta"))
     hap = get_hap_name(idx)
 
     try:
-        subprocess.run([minimap_path, '-x', 'asm10', '-D', '-c', '-t', str(threads), '-o',
-                        align_file, contig_path, contig_path], check=True)
+        continue_merge = True
+        iter = 1
 
-        align_paf = pio.load_query_alignments(align_file)
+        while continue_merge:
+            logging.info("Contig stitching for {0} iteration {1}".format(hap, iter))
+            continue_merge = False
+            contig_dict = SeqIO.to_dict(SeqIO.parse(contig_path, "fasta"))
+            subprocess.run([minimap_path, '-x', 'asm10', '-D', '-c', '-t', str(threads), '-o',
+                            align_file, contig_path, contig_path], check=True)
 
-        updated_contigs = {}
-        contigs_to_remove = set()
-        for align_list in align_paf:
-            for a in align_list:
-                if (a.target_name != a.query_name and abs(a.query_end - a.query_length) < end_distance and a.target_start < end_distance and
-                        a.align_length > overlap_length and a.identityNM > overlap_identity):
+            align_paf = pio.load_single_alignments(align_file)
+
+            merged_seq = None
+            for a in align_paf:
+                if a.target_name != a.query_name and a.identityNM >= overlap_identity and a.align_length >= overlap_length and a.target_name:
+                    if abs(a.query_end - a.query_length) < end_distance and a.target_start < end_distance:
+                        merged_seq = str(contig_dict[a.query_name].seq)[:a.query_end] + str(contig_dict[a.target_name].seq)[a.target_end:]
+                    elif abs(a.query_end - a.query_length) < end_distance and abs(a.target_end - a.target_length) < end_distance:
+                        merged_seq = str(contig_dict[a.query_name].seq)[:a.query_end] + str(contig_dict[a.target_name].seq[:a.target_start].reverse_complement())
+
+                if merged_seq is not None:
+                    continue_merge = True
+                    iter += 1
                     logging.info("Found overlap between {0} and {1}".format(a.target_name, a.query_name))
-                    stl.append("{0}\t{1}\t{2}\t{3}\t{4:.4f}".format(hap, a.query_name, a.target_name, a.align_length, a.identityNM))
-                    merged_seq = str(contig_dict[a.query_name].seq)[:a.query_end] + str(contig_dict[a.target_name].seq)[a.target_end:]
+                    stl.append("{0}\t{1}\t{2}\t{3}\t{4:.4f}".format(hap, a.query_name, a.target_name, a.align_length,a.identityNM))
                     record = SeqRecord(Seq(merged_seq), id='merged_{0}_{1}'.format(a.query_name, a.target_name), description="")
-                    updated_contigs[record.id] = record
-                    contigs_to_remove.add(a.query_name)
-                    contigs_to_remove.add(a.target_name)
-        for contig in contig_dict.keys():
-            if contig not in contigs_to_remove:
-                updated_contigs[contig] = contig_dict[contig]
+                    updated_contigs = [record]
 
-    except subprocess.CalledProcessError as error:
-        logging.error("Error overlapping assemblies: {0}".format(error.cmd))
+                    for contig, record in contig_dict.items():
+                        if contig != a.query_name and contig  != a.target_name:
+                            updated_contigs.append(record)
+                    SeqIO.write(updated_contigs, contig_path, "fasta")
+                    break
+
+    except subprocess.CalledProcessError as cpe:
+        logging.error("Error overlapping assemblies: {0}".format(cpe.cmd))
         sys.exit(1)
     finally:
         if os.path.exists(align_file):
             os.remove(align_file)
-
-    SeqIO.write(updated_contigs.values(), contig_path, "fasta")
 
 
 def get_hap_name(idx):

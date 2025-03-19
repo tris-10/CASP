@@ -8,44 +8,41 @@ ONT Adapative Sampling reads corrected with HERRO.
 The pipeline is a combination of existing tools (listed below) and custom python scripts 
 packaged in a Nextflow pipeline.  Apptainer/Singurity image files containing the necessary
 third party tools and the required resource files can be found on Zenodo: XXXXX. 
-The pipeline is compatable with HPC environments and is currently set up for the 
-Slurm workload man.
-
-## Data
-
-Raw ONT reads used in this project can be found on SRA: XXX. Final assemblies for each sample
-can be found on Zenodo: 
+The pipeline is compatable with HPC environments with Singularity installed and is currently 
+set up for the Slurm workload manager.
 
 ## Installation
 
 1. Install [Nextflow](https://www.nextflow.io/docs/latest/install.html)
 1. Clone the repository
 1. Download the resource bundle from Zenodo and extract.  The `resources` and `images` directories
-   should be on the same level as `scripts` and `sfe_fastq`
+   should be on the same level as `scripts`
 1. Modify the `process` and `singularity` sections of the relevant `*.config` file to match HPC resources.
     * Process: The `executor` variable should be set to the HPC scheduler: https://www.nextflow.io/docs/latest/executor.html. 
       The `clusterOptions` line can be used to set email preferences, cluster queues/nodes or job time 
-      limits. Note that the herro_inference process requires a GPU queue/node to be specified. 
-      https://github.com/lbcb-sci/herro
+      limits. Example (slurm): `clusterOptions= '--mail-user xxx@xxx.edu --mail-type FAIL --time 96:00:00'`. Note that the herro_inference process has its own `clusterOptions` line, as it requires a GPU node for execution.
+      Follow your institution's instructions on how to request GPU nodes: Example (slurm):  `clusterOptions= '--mail-user xxx@xxx.edu -p gpuq --gres=gpu:a100:1`. 
     * Singularity: The appropriate singularity bind path should be set using: `runOptions` 
-      https://docs.sylabs.io/guides/3.0/user-guide/bind_paths_and_mounts.html
+      https://docs.sylabs.io/guides/3.0/user-guide/bind_paths_and_mounts.html. Example: `runOptions = "-B /mnt/"`
 
       
-## How to Run: CASP MHC
+## How to Run: CASP MHC/KIR
 
-1. The main MHC assembly pipeline supports SFE or combination of SFE + UL reads.  Copy the project fastq files
-   into the `sfe_fastq` and/or `ul_fastq` depending on what was seqeunced. SFE fastq files should be named: 
-   `SAMPLE_SFE.fastq.gz`, where `SAMPLE` is a name of your choice.  UL fastq files should be named `SAMPLE_UL.fastq.gz`.
-1. The project name can be modified by updating the `project_name` paramter in the config file `casp_mhc.config`.  The `run_type` 
+1. ONT data should be basecalled with Dorado (traditional + 5mC) prior to running the pipeline.  Example basecalling command: `dorado basecaller sup,5mCG_5hmCG pod5/ --min-qscore 10 > SAMPLE_SFE.bam`
+1. The CASP assembly pipeline supports SFE or a combination of SFE + UL reads.  Copy or link all basecalled ONT reads in bam format
+   into the `sfe_bam` and/or `ul_bam` directory depending on what was sequenced, one file per sample. SFE bam files should be named: 
+   `SAMPLE_SFE.bam`, where `SAMPLE` is a name of your choice.  UL fastq files should be named `SAMPLE_UL.bam`.
+1. The project name can be modified by updating the `project_name` parameter in the config file (e.g.`casp_mhc.config`).  The `run_type` 
    parameter should be set to `sfe` or `sfe_ul` depending on the available reads.
-1. The pipeline can be started with the command `nextflow run casp_mhc.nf -c casp_mhc.config`
+1. The pipeline can be started with the command `nextflow run casp.nf -c casp_mhc.config`
    
 
-## How to Run: HIFIASM MHC / KIR
+## How to Run: HIFIASM MHC/KIR
 
-1. The hifiasm MHC/KIR assembly pipeline supports SFE-only, UL-only or a combination.  Copy the project fastq files
-   into the `sfe_fastq` and/or `ul_fastq` depending on what was seqeunced. SFE fastq files should be named: 
-   `SAMPLE_SFE.fastq.gz`, where `SAMPLE` is a name of your choice.  UL fastq files should be named `SAMPLE_UL.fastq.gz`.
+1. ONT data should be basecalled with Dorado (traditional) prior to running the pipeline.  Example basecalling command: `dorado basecaller sup pod5/ --min-qscore 10 > SAMPLE_SFE.bam`
+1. The hifiasm MHC/KIR assembly pipeline supports SFE-only, UL-only or a combination.  Copy the basecalled ONT reads in bam format
+   into the `sfe_bam` and/or `ul_bam` depending on what was seqeunced. SFE bam files should be named: 
+   `SAMPLE_SFE.bam`, where `SAMPLE` is a name of your choice.  UL fastq files should be named `SAMPLE_UL.bam`.
 1. The project name can be modified by updating the `project_name` paramter in the config file `casp_hifiasm_[kir/mhc].config`. 
    The `run_type` parameter should be set to `sfe`, `ul` or `sfe_ul` depending on the available reads.
 1. The pipeline can be started with the command `nextflow run casp_hifism.nf -c casp_hifism_REGION.config`, where REGION is KIR or MHC.
@@ -53,7 +50,7 @@ can be found on Zenodo:
 
 ## How to Run: HIFIASM custom
 
-1. Create a custom reference file named `hg38_REGION.fasta`, where `REGION` is the name of your region of interest. 
+1. Create a custom reference file named `REGION_align_ref.fasta`, where `REGION` is the name of your region of interest. 
    If haplotypic sequences were used as part of the adaptive sampling targeting, they should be added to the hg38 reference.
    If the adaptive sampling only targeted a subset of hg38, no modifications to hg38 are required. 
 1. Create the region interval file named `REGION_region.bed`.  This file should list all of the intervals representing your
@@ -94,4 +91,5 @@ can be found on Zenodo:
 * [bedtools](https://github.com/arq5x/bedtools2)
 * [HERRO](https://github.com/lbcb-sci/herro)
 * [Hifiasm](https://github.com/chhylp123/hifiasm)
+* [MethPhaser](https://github.com/treangenlab/methphaser)
 

@@ -192,18 +192,19 @@ class PhaseBlock:
         new_blocks = [up_block, down_block, mid_block]
         return new_blocks
 
-    def split_hom_block(self, pred_hemi_regions, min_split=5000):
+    def split_hom_block(self, pred_hemi_regions, min_het_count, min_split=5000):
         """
         Split hemizygous blocks into hemi and homozygous blocks if the ends of the hemizygous blocks don't have
         SNPs and don't overlap with any other contig
 
         :param pred_hemi_regions: List of predicted hemizygous regions
+        :param min_het_count: The minimum number of hets required to assign a block hemizygous
         :param min_split: The minimum distance from end of block to initiate splitting
         :return:
         """
         hemi_block = None
         hom_regions = []
-        if len([x for x in self.snp_list if x.valid]) < 2:
+        if len([x for x in self.snp_list if x.valid]) < min_het_count:
             return hemi_block, hom_regions
         else:
             sorted_snps = sorted(self.snp_list, key=lambda x: x.contig_pos)
@@ -257,5 +258,6 @@ class PhaseBlock:
                 return True
         else:
             return False
+
 
 

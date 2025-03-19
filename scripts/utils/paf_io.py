@@ -66,3 +66,18 @@ def load_query_alignments(paf_file):
                 last_query_name = pa.query_name
             query_align_list.append(pa)
     yield query_align_list
+
+
+def load_single_alignments(paf_file):
+    """
+     Reads through an alignment file in PAF format. Returns all alignments for each query sequence. Assumes
+     the PAF file isn't sorted differently than the default.
+
+     :param paf_file: Path to alignment file in PAF format.
+     :return: list of PAFAlignment objects for each query sequence
+     """
+    
+    with open(paf_file, 'r') as paf_in:
+        for line in paf_in:
+            pa = PAFAlignment(line)
+            yield pa

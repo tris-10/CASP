@@ -6,7 +6,9 @@ include { asm_finalize } from './modules/shared'
 
 process read_trimming {
     container = 'CASP_v1.sif'
-    label = 'md_resources'
+    label = 'low_resources'
+
+    publishDir "${params.output_dir}/${params.region}_reads/", mode: 'link', pattern: "*.{fasta,fai}", saveAs: {filename -> "${sample_name}_${params.region}_$filename"}
 
     input:
     tuple val(sample_name), val(input_type), path(corr_reads)
@@ -25,6 +27,8 @@ process read_trimming {
 process hifiasm_sfe {
     container = 'CASP_v1.sif'
     label = 'assembly'
+
+    publishDir "${params.output_dir}/${params.region}_asm/", mode: 'link', pattern: "*.{fasta,fai}", saveAs: {filename -> "${sample_name}_${params.region}_$filename"}
 
     input:
     tuple val(sample_name), path(trimmed_fasta), path(trimmed_fai)
@@ -62,7 +66,7 @@ process hifiasm_ul {
 
 process split_ul_reads {
     container = 'CASP_v1.sif'
-    label = "min_resources"
+    label = "low_resources"
 
     publishDir "${params.output_dir}/${params.region}_reads/", mode: 'link', pattern: "*.{fasta,fai}", saveAs: {filename -> "${sample_name}_${params.region}_$filename"}
 
@@ -79,22 +83,23 @@ process split_ul_reads {
 }
 
 
+
 workflow {
     if (params.input_type == 'sfe') {
-        fastq_ch = Channel.fromPath("${params.sfe_dir}/*_SFE.fastq.gz", checkIfExists: true).map{tuple(it.getSimpleName().split("_SFE")[0], "sfe", it)}
+        sfe_ch = Channel.fromPath("${params.sfe_dir}/*_SFE.bam", checkIfExists: true).map{tuple(it.getSimpleName().split("_SFE")[0], "sfe", it)}
         
-        align_all_to_ref(fastq_ch) 
+        align_all_to_ref(sfe_ch) 
             | extract_reads 
             | herro_preprocess 
             | herro_inference 
             | read_trimming 
             | hifiasm_sfe 
             | asm_finalize
-      
+
     } else if (params.input_type == 'ul') {
-        fastq_ch = Channel.fromPath("${params.ul_dir}/*_UL.fastq.gz", checkIfExists: true).map{tuple(it.getSimpleName().split("_UL")[0], "ul", it)}
+        ul_ch = Channel.fromPath("${params.sfe_dir}/*_UL.bam", checkIfExists: true).map{tuple(it.getSimpleName().split("_UL")[0], "ul", it)}
             
-        align_all_to_ref(fastq_ch) 
+        align_all_to_ref(ul_ch) 
             | extract_reads 
             | herro_preprocess 
             | herro_inference 
@@ -105,17 +110,20 @@ workflow {
             | asm_finalize
         
     } else if (params.input_type == 'sfe_ul') {
-        sfe_ch = Channel.fromPath("${params.sfe_dir}/*fastq.gz", checkIfExists: true).map{tuple(it.getSimpleName().split("_SFE")[0], "sfe", it)}
-        ul_ch = Channel.fromPath("${params.ul_dir}/*fastq.gz", checkIfExists: true).map{tuple(it.getSimpleName().split("_UL")[0], "ul", it)}
+        sfe_ch = Channel.fromPath("${params.sfe_dir}/*_SFE.bam", checkIfExists: true).map{tuple(it.getSimpleName().split("_SFE")[0], "sfe", it)}
+        ul_ch = Channel.fromPath("${params.ul_dir}/*_UL.bam", checkIfExists: true).map{tuple(it.getSimpleName().split("_UL")[0], "ul", it)}
 
         sfe_ch.join(ul_ch) 
             | map({ sample, sfe_type, sfe_fastq, ul_type, ul_fastq -> [tuple(sample, sfe_type, sfe_fastq), tuple(sample, ul_type, ul_fastq)]})
             | align_all_to_ref
             | extract_reads
-            | branch {
-               sfe: it[1] == 'sfe'
-               ul: it[1] == 'ul'
-             }.set { region_reads }
+        
+        extract_reads.out.branch {
+            sfe: it[1] == 'sfe'
+                return tuple(it[0],it[2])
+            ul: it[1] == 'ul'
+                return tuple(it[0], it[2])
+            }.set { region_reads }
 
         herro_preprocess(region_reads.sfe) 
             | herro_inference 
@@ -128,5 +136,6 @@ workflow {
         error("Invalid input type: parameter 'input_type' must be set to 'sfe', 'sfe_ul' or 'ul'")
     }
 }
+
 
 

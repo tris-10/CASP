@@ -20,10 +20,10 @@ def main():
     parser.add_argument("output_stats", help="Path to VCF filtering stats.")
     parser.add_argument("-m", "--min_qual", type=float, default=0, help="Minimum mapping quality to retain.")
     parser.add_argument("-d", "--min_depth", type=float, default=0, help="Minimum depth of coverage to retain.")
+    parser.add_argument("-a", "--min_allele_count", type=int, default=0, help="Minimum allele count to consider heterozygous")
+    parser.add_argument("-f", "--min_allele_freq", type=float, default=0, help="Minimum allele frequency to consider heterozygous")
     parser.add_argument("-p", "--remove_phase", default=False, action="store_true",
                         help="Remove phasing information from the VCF file.")
-    parser.add_argument("-s", "--rccx_start", type=int, default=31981000, help="Starting coordinate compliment")
-    parser.add_argument("-e", "--rccx_end", type=int, default=32047000, help="Ending coordinate compliment")
     args = parser.parse_args()
 
     logging.basicConfig(format='%(levelname)s:%(asctime)s %(message)s', level=logging.INFO)
@@ -45,7 +45,7 @@ def main():
             gt = sd["GT"]
             ac = r.info["AC"]
 
-            if gt[0] == 1 and gt[1] == 1:
+            if (gt[0] == 1 and gt[1] == 1) or (min(ac) < args.min_allele_count) or (min(ac) / sum(ac) < args.min_allele_freq):
                 homozygous += 1
                 continue
             if r.qual < args.min_qual:
@@ -63,7 +63,7 @@ def main():
             alt = r.alts[0].upper()
 
             key = "{0}-{1}-{2}-{3}".format(r.chrom, r.pos, ref, alt)
-            if key in valid_positions and (r.chrom != "chr6" or r.pos < args.rccx_start or r.pos > args.rccx_end):
+            if key in valid_positions:
                 r.id = valid_positions[key]
                 vcf_out.write(r)
                 kept += 1
@@ -87,3 +87,4 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         sys.exit(1)
+

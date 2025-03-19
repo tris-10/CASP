@@ -1,18 +1,16 @@
-
-
 process align_all_to_ref {
     container 'CASP_v1.sif'
 
     publishDir "${params.output_dir}/${params.region}_align/", mode: 'link', saveAs: {filename -> "${sample_name}_${input_type}_$filename"}
 
     input:
-    tuple val(sample_name), val(input_type), path(full_fastq)
+    tuple val(sample_name), val(input_type), path(unalign_bam)
 
     output:
     tuple val(sample_name), val(input_type), path("full.bam"), path("full.bam.bai"), emit: full_align
 
     """
-    minimap2 -x map-ont -a -t ${task.cpus} ${params.resource_dir}/hg38_${params.region}.fasta ${full_fastq} | samtools sort - -o full.bam && samtools index full.bam
+    samtools fastq -TMM,ML ${unalign_bam} | minimap2 -x map-ont -y --secondary=no -a -t ${task.cpus} ${params.resource_dir}/${params.region}_align_ref.fasta - | samtools sort - -o full.bam && samtools index full.bam
     """
 }
 
@@ -29,13 +27,12 @@ process extract_reads {
     tuple val(sample_name), val(input_type), path("${input_type}_region.fastq"), path("${input_type}_region.fastq.fai"), emit: region_reads
     
     """
-    samtools view -b -F 0x100 ${full_bam} -L ${params.resource_dir}/${params.region}_region.bed | samtools fastq - | seqkit seq -m ${params.extract_min_length} > ${input_type}_region.fastq && samtools faidx ${input_type}_region.fastq
+    samtools view -bh -F 0x100 ${full_bam} -L ${params.resource_dir}/${params.region}_region.bed | samtools fastq -TMM,ML - | seqkit seq -m ${params.extract_min_length} > ${input_type}_region.fastq && samtools faidx ${input_type}_region.fastq
     """
 }
 
 process herro_preprocess {
     container 'HERRO_scripts.sif'
-    label 'med_resources'
       
     input: 
     tuple val(sample_name), val(input_type), path(region_fastq), path(region_fai)
@@ -68,7 +65,6 @@ process herro_inference {
 
 process asm_finalize {
     container = 'CASP_v1.sif'
-    label = 'med_resources'
 
     publishDir "${params.output_dir}/${params.region}_final_contigs/", mode: 'link', pattern: "*.{fasta,fai}", saveAs: {filename -> "${sample_name}_${params.region}_$filename"}
     publishDir "${params.output_dir}/${params.region}_stats/", mode: 'link', pattern: "*stats.tsv", saveAs: {filename -> "${sample_name}_${params.region}_$filename"}
@@ -78,7 +74,7 @@ process asm_finalize {
 
     output:
     tuple val(sample_name), path('hap1_final_contigs.fasta'), path('hap1_final_contigs.fasta.fai'), path('hap2_final_contigs.fasta'), path('hap2_final_contigs.fasta.fai'), emit: final_assembly
-    path 'hap_asm_filt_stats.tsv'
+    tuple val(sample_name), path('hap_asm_filt_stats.tsv'), emit: asm_finalize_stats
 
     """
     python ${params.script_dir}/finalize_contigs.py ${hap1_fasta} ${hap2_fasta} ${params.resource_dir}/${params.region}_boundary.fasta hap1_final_contigs.fasta hap2_final_contigs.fasta \
